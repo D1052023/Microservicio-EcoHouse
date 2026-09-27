@@ -28,6 +28,7 @@ describe("calcularSimulacion", () => {
     expect(resultado.proyeccion.length).toBeGreaterThan(1);
     expect(resultado.proyeccion.at(-1)?.acumulado).toBe(resultado.cuotaInicial);
     expect(resultado.superaUmbralCincoAnios).toBe(true);
+    expect(resultado.superaUmbralMaximo).toBe(true);
     expect(resultado.planes.some((plan) => plan.id === "acelerado" && plan.destacado)).toBe(
       true,
     );

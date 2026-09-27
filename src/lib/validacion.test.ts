@@ -3,7 +3,9 @@ import {
   aporteMinimoRequerido,
   cumpleReglaAporteMinimo,
   mensajeReglaAporteMinimo,
+  puedeGuardarEscenario,
   validarFormulario,
+  validarGuardadoEscenario,
 } from "./validacion";
 import { VALORES_DEFAULT } from "../types/simulacion";
 
@@ -44,5 +46,14 @@ describe("regla del 5% de aporte mínimo", () => {
       porcentajeCuotaInicial: 9,
     });
     expect(alertas.some((alerta) => alerta.id === "cuota")).toBe(true);
+  });
+
+  it("marca error si el horizonte supera 15 años y no hay plan revisado", () => {
+    const alertas = validarGuardadoEscenario(VALORES_DEFAULT);
+    const horizonte = alertas.find((alerta) => alerta.id === "horizonte-maximo");
+    expect(horizonte?.tipo).toBe("error");
+    expect(horizonte?.mensaje).toContain("15 años");
+    expect(puedeGuardarEscenario(VALORES_DEFAULT)).toBe(false);
+    expect(puedeGuardarEscenario(VALORES_DEFAULT, "cuota-20")).toBe(true);
   });
 });

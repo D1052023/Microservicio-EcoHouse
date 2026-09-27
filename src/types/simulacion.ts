@@ -8,6 +8,8 @@ export const PORCENTAJE_CUOTA_MINIMO = 10;
 export const PORCENTAJE_CUOTA_DEFAULT = 30;
 export const RATIO_APORTE_MINIMO = 0.05;
 export const UMBRAL_MESES_PLAN_ACELERADO = 60;
+/** Horizonte máximo razonable para guardar un escenario: 15 años. */
+export const UMBRAL_MAXIMO_MESES = 180;
 export const FACTOR_PLAN_ACELERADO = 1.2;
 export const MAX_MESES_PROYECCION = 240;
 
@@ -57,6 +59,7 @@ export interface ResultadoSimulacion {
   mesesRestantes: number;
   yaAlcanzado: boolean;
   superaUmbralCincoAnios: boolean;
+  superaUmbralMaximo: boolean;
   proyeccion: PuntoProyeccion[];
   planes: PlanAlternativo[];
   ciudad: Ciudad;
@@ -73,4 +76,11 @@ export interface EscenarioGuardado {
   fechaIso: string;
   formulario: FormularioSimulacion;
   meses: number;
+  planAlternativoId?: string;
+}
+
+export interface CuerpoGuardarEscenario {
+  formulario: FormularioSimulacion;
+  escenarioId?: string;
+  planAlternativoId?: string;
 }

@@ -1,6 +1,7 @@
 import {
   FACTOR_PLAN_ACELERADO,
   MAX_MESES_PROYECCION,
+  UMBRAL_MAXIMO_MESES,
   UMBRAL_MESES_PLAN_ACELERADO,
   type FormularioSimulacion,
   type PlanAlternativo,
@@ -9,6 +10,13 @@ import {
 } from "../types/simulacion";
 import { generarIdEscenario } from "./formato";
 
+/**
+ * Calcula el monto de la cuota inicial (enganche).
+ *
+ * @param valorInmueble - Precio del inmueble en COP.
+ * @param porcentajeCuotaInicial - Porcentaje de enganche (mínimo de negocio: 10).
+ * @returns Cuota inicial en COP.
+ */
 export function calcularCuotaInicial(
   valorInmueble: number,
   porcentajeCuotaInicial: number,
@@ -16,6 +24,13 @@ export function calcularCuotaInicial(
   return valorInmueble * (porcentajeCuotaInicial / 100);
 }
 
+/**
+ * Convierte el aporte periódico a un equivalente mensual en COP.
+ * Frecuencia quincenal: dos aportes por mes calendario.
+ *
+ * @param aportePeriodico - Monto por periodo en COP.
+ * @param frecuencia - `Mensual` o `Quincenal`.
+ */
 export function aporteMensualEquivalente(
   aportePeriodico: number,
   frecuencia: FormularioSimulacion["frecuencia"],
@@ -23,6 +38,13 @@ export function aporteMensualEquivalente(
   return frecuencia === "Quincenal" ? aportePeriodico * 2 : aportePeriodico;
 }
 
+/**
+ * Estima los meses calendario necesarios para cubrir el faltante.
+ *
+ * @param faltante - Meta pendiente en COP (cuota inicial − ahorro inicial, mínimo 0).
+ * @param ahorroMensual - Ahorro equivalente mensual en COP.
+ * @returns Meses enteros (techo). `0` si ya se cubrió; `Infinity` si el ahorro mensual no es positivo.
+ */
 export function calcularMesesParaMeta(
   faltante: number,
   ahorroMensual: number,
@@ -32,7 +54,15 @@ export function calcularMesesParaMeta(
   return Math.ceil(faltante / ahorroMensual);
 }
 
-function construirProyeccion(
+/**
+ * Serie mes a mes del ahorro acumulado frente a la meta de cuota inicial.
+ *
+ * @param ahorroInicial - Saldo inicial en COP.
+ * @param ahorroMensual - Aporte equivalente mensual en COP.
+ * @param meta - Cuota inicial objetivo en COP.
+ * @param meses - Horizonte estimado en meses (se recorta a `MAX_MESES_PROYECCION`).
+ */
+export function construirProyeccion(
   ahorroInicial: number,
   ahorroMensual: number,
   meta: number,
@@ -75,7 +105,17 @@ function calcularMesesConAporteMensual(
   return calcularMesesParaMeta(faltante, ahorroMensual);
 }
 
-function construirPlanes(form: FormularioSimulacion, mesesBase: number): PlanAlternativo[] {
+/**
+ * Construye planes alternativos (Acelerado +20%, cuota 20%, quincenal o +30%).
+ * El Plan Acelerado se marca `destacado` y se ordena primero si el plan base supera 60 meses.
+ *
+ * @param form - Campos del escenario (montos en COP).
+ * @param mesesBase - Duración del plan actual en meses.
+ */
+export function construirPlanes(
+  form: FormularioSimulacion,
+  mesesBase: number,
+): PlanAlternativo[] {
   const ahorroMensualBase = aporteMensualEquivalente(
     form.aportePeriodico,
     form.frecuencia,
@@ -145,6 +185,12 @@ function construirPlanes(form: FormularioSimulacion, mesesBase: number): PlanAlt
   return planes;
 }
 
+/**
+ * Ejecuta la simulación completa: cuota inicial, meses, proyección y planes.
+ *
+ * @param form - Entradas del usuario (COP, ciudad, frecuencia, porcentaje).
+ * @param escenarioId - UUID del escenario; si se omite se genera uno nuevo.
+ */
 export function calcularSimulacion(
   form: FormularioSimulacion,
   escenarioId = generarIdEscenario(),
@@ -173,6 +219,7 @@ export function calcularSimulacion(
     mesesRestantes,
     yaAlcanzado: faltante <= 0,
     superaUmbralCincoAnios: meses > UMBRAL_MESES_PLAN_ACELERADO,
+    superaUmbralMaximo: meses > UMBRAL_MAXIMO_MESES,
     proyeccion: construirProyeccion(
       form.ahorroInicial,
       ahorroMensual,

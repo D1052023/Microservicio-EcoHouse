@@ -1,12 +1,17 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { BookmarkPlus, Leaf, RotateCcw } from "lucide-react";
 import FormularioSimulacion from "./FormularioSimulacion";
-import GraficoProyeccion from "./GraficoProyeccion";
 import MetricasPrincipales from "./MetricasPrincipales";
 import PanelAlertas from "./PanelAlertas";
 import TarjetasResumen from "./TarjetasResumen";
 import { calcularSimulacion } from "../lib/simulacion";
-import { formularioEsValido, validarFormulario } from "../lib/validacion";
+import { ErrorHttp, guardarEscenario, listarEscenarios } from "../lib/api";
+import {
+  formularioEsValido,
+  mensajeHorizonteMaximo,
+  puedeGuardarEscenario,
+  validarFormulario,
+} from "../lib/validacion";
 import { formatearMesesAnios } from "../lib/formato";
 import {
   UMBRAL_MESES_PLAN_ACELERADO,
@@ -17,39 +22,81 @@ import {
   type ResultadoSimulacion,
 } from "../types/simulacion";
 
-const STORAGE_KEY = "ecohouse.escenarios";
-
-function leerEscenarios(): EscenarioGuardado[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as EscenarioGuardado[]) : [];
-  } catch {
-    return [];
-  }
-}
+const GraficoProyeccion = lazy(() => import("./GraficoProyeccion"));
 
 export default function InterfazSimulacionAhorro() {
   const [formulario, setFormulario] = useState<Formulario>(VALORES_DEFAULT);
   const [resultado, setResultado] = useState<ResultadoSimulacion | null>(null);
   const [calculando, setCalculando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
   const [guardado, setGuardado] = useState(false);
-  const [escenarios, setEscenarios] = useState<EscenarioGuardado[]>(() =>
-    typeof window === "undefined" ? [] : leerEscenarios(),
-  );
+  const [planSeleccionadoId, setPlanSeleccionadoId] = useState<string | undefined>();
+  const [errorHttp, setErrorHttp] = useState<AlertaValidacion | null>(null);
+  const [escenarios, setEscenarios] = useState<EscenarioGuardado[]>([]);
+
+  useEffect(() => {
+    let cancelado = false;
+    listarEscenarios()
+      .then((lista) => {
+        if (!cancelado) {
+          setEscenarios(lista);
+          setErrorHttp(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelado) return;
+        const mensaje =
+          err instanceof ErrorHttp
+            ? err.message
+            : "No se pudieron cargar los escenarios guardados. Comprueba que la API esté en ejecución.";
+        setErrorHttp({ id: "api-listar", tipo: "error", mensaje });
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
 
   const errores = useMemo(() => validarFormulario(formulario), [formulario]);
   const puedeCalcular = formularioEsValido(formulario);
+  const puedeGuardar =
+    Boolean(resultado) &&
+    !guardando &&
+    puedeGuardarEscenario(formulario, planSeleccionadoId);
 
   const alertas: AlertaValidacion[] = useMemo(() => {
     const lista = [...errores];
-    if (resultado?.superaUmbralCincoAnios) {
+    if (errorHttp) lista.push(errorHttp);
+
+    if (resultado?.superaUmbralMaximo && !planSeleccionadoId) {
+      lista.push({
+        id: "horizonte-maximo",
+        tipo: "error",
+        mensaje: mensajeHorizonteMaximo(resultado.meses),
+      });
+    }
+
+    if (resultado?.superaUmbralCincoAnios && !resultado.superaUmbralMaximo) {
       lista.push({
         id: "horizonte-largo",
         tipo: "advertencia",
         mensaje: `El ahorro estimado supera ${UMBRAL_MESES_PLAN_ACELERADO} meses (${formatearMesesAnios(resultado.meses)}). Revisa el Plan Acelerado.`,
       });
     }
-    if (resultado && !resultado.yaAlcanzado && errores.length === 0) {
+
+    if (resultado?.superaUmbralMaximo && planSeleccionadoId) {
+      const plan = resultado.planes.find((item) => item.id === planSeleccionadoId);
+      lista.push({
+        id: "plan-revisado",
+        tipo: "exito",
+        mensaje: `Plan alternativo revisado: ${plan?.nombre ?? planSeleccionadoId}. Ya puedes guardar el escenario.`,
+      });
+    } else if (
+      resultado &&
+      !resultado.yaAlcanzado &&
+      !resultado.superaUmbralMaximo &&
+      errores.length === 0 &&
+      !errorHttp
+    ) {
       lista.push({
         id: "listo",
         tipo: "exito",
@@ -57,13 +104,15 @@ export default function InterfazSimulacionAhorro() {
       });
     }
     return lista;
-  }, [errores, resultado]);
+  }, [errores, errorHttp, planSeleccionadoId, resultado]);
 
   const calcular = () => {
     if (!puedeCalcular) return;
     const inicio = performance.now();
     setCalculando(true);
     setGuardado(false);
+    setPlanSeleccionadoId(undefined);
+    setErrorHttp(null);
 
     const siguiente = calcularSimulacion(formulario);
     setResultado(siguiente);
@@ -72,24 +121,35 @@ export default function InterfazSimulacionAhorro() {
     window.setTimeout(() => setCalculando(false), restante);
   };
 
-  const guardar = () => {
-    if (!resultado || !puedeCalcular) return;
-    const registro: EscenarioGuardado = {
-      id: resultado.escenarioId,
-      fechaIso: new Date().toISOString(),
-      formulario,
-      meses: resultado.meses,
-    };
-    const siguiente = [registro, ...escenarios].slice(0, 8);
-    setEscenarios(siguiente);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(siguiente));
-    setGuardado(true);
+  const guardar = async () => {
+    if (!resultado || !puedeGuardar) return;
+    setGuardando(true);
+    setErrorHttp(null);
+    try {
+      const registro = await guardarEscenario({
+        formulario,
+        escenarioId: resultado.escenarioId,
+        planAlternativoId: planSeleccionadoId,
+      });
+      setEscenarios((prev) => [registro, ...prev.filter((item) => item.id !== registro.id)].slice(0, 8));
+      setGuardado(true);
+    } catch (err: unknown) {
+      const mensaje =
+        err instanceof ErrorHttp
+          ? err.message
+          : "No se pudo guardar el escenario. Intenta de nuevo.";
+      setErrorHttp({ id: "api-guardar", tipo: "error", mensaje });
+    } finally {
+      setGuardando(false);
+    }
   };
 
   const reiniciar = () => {
     setFormulario(VALORES_DEFAULT);
     setResultado(null);
     setGuardado(false);
+    setPlanSeleccionadoId(undefined);
+    setErrorHttp(null);
   };
 
   return (
@@ -130,6 +190,7 @@ export default function InterfazSimulacionAhorro() {
             onChange={(valores) => {
               setFormulario(valores);
               setGuardado(false);
+              setPlanSeleccionadoId(undefined);
             }}
             onCalcular={calcular}
             puedeCalcular={puedeCalcular}
@@ -137,7 +198,7 @@ export default function InterfazSimulacionAhorro() {
           />
         </section>
 
-        <section className="flex flex-col gap-4 lg:col-span-7">
+        <section className="flex flex-col gap-4 lg:col-span-7" aria-label="Resultados de la simulación">
           <PanelAlertas alertas={alertas} />
 
           {resultado ? (
@@ -151,12 +212,13 @@ export default function InterfazSimulacionAhorro() {
                 </p>
                 <button
                   type="button"
-                  onClick={guardar}
-                  disabled={!puedeCalcular}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-ocean-700 px-3 py-2 text-sm font-semibold text-white hover:bg-ocean-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  onClick={() => void guardar()}
+                  disabled={!puedeGuardar}
+                  aria-disabled={!puedeGuardar}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-ocean-700 px-3 py-2 text-sm font-semibold text-white hover:bg-ocean-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700"
                 >
                   <BookmarkPlus className="h-4 w-4" aria-hidden="true" />
-                  {guardado ? "Escenario guardado" : "Guardar Escenario"}
+                  {guardando ? "Guardando…" : guardado ? "Escenario guardado" : "Guardar Escenario"}
                 </button>
               </div>
 
@@ -166,12 +228,26 @@ export default function InterfazSimulacionAhorro() {
                 <h2 className="mb-3 text-lg font-semibold text-slate-900">
                   Proyección de ahorro vs meta
                 </h2>
-                <GraficoProyeccion datos={resultado.proyeccion} />
+                <Suspense
+                  fallback={
+                    <p className="py-16 text-center text-sm text-slate-600" role="status">
+                      Cargando gráfico de proyección…
+                    </p>
+                  }
+                >
+                  <GraficoProyeccion datos={resultado.proyeccion} />
+                </Suspense>
               </div>
 
               <TarjetasResumen
                 planes={resultado.planes}
                 forzarAcelerado={resultado.superaUmbralCincoAnios}
+                exigirRevision={resultado.superaUmbralMaximo && !planSeleccionadoId}
+                planSeleccionadoId={planSeleccionadoId}
+                onSeleccionarPlan={(plan) => {
+                  setPlanSeleccionadoId(plan.id);
+                  setGuardado(false);
+                }}
               />
             </>
           ) : (

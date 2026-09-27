@@ -5,6 +5,7 @@ import {
   type FormularioSimulacion,
 } from "../types/simulacion";
 import { formatearCOP } from "../lib/formato";
+import { parsearMontoNoNegativo } from "../lib/montos";
 import { aporteMinimoRequerido, cumpleReglaAporteMinimo } from "../lib/validacion";
 
 interface FormularioSimulacionProps {
@@ -52,7 +53,7 @@ function CampoMoneda({
         min={min}
         step={50000}
         value={Number.isFinite(valor) ? valor : 0}
-        onChange={(e) => onValor(Number(e.target.value))}
+        onChange={(e) => onValor(parsearMontoNoNegativo(e.target.value))}
         aria-invalid={Boolean(error)}
         aria-describedby={describedBy || undefined}
         className={`w-full rounded-xl border bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none transition focus:ring-2 ${
