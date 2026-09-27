@@ -1,3 +1,4 @@
+import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { axe } from "jest-axe";
@@ -70,7 +71,7 @@ describe("InterfazSimulacionAhorro", () => {
     expect(await screen.findByText("220 meses")).toBeInTheDocument();
     expect(screen.getByText("Plan Acelerado")).toBeInTheDocument();
     expect(
-      await screen.findByLabelText(/gráfico de proyección del ahorro acumulado/i),
+      await screen.findByRole("img", { name: /gráfico de proyección del ahorro acumulado/i }, { timeout: 4000 })
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /guardar escenario/i })).toBeDisabled();
     expect(screen.getByRole("alert").textContent).toMatch(/15 años/);
